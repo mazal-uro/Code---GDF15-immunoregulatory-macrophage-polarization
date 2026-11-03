@@ -1,0 +1,113 @@
+# Load required libraries
+library(flowCore)
+library(ggplot2)
+library(dplyr)
+library(Rtsne)
+
+# Set working directory
+setwd('/Users/alekhyamazumdar/Documents/Cytek Aurora/AM006 ReAnalysis with Beads/Unmixed/Clean Data/18thFEB Analysis')
+
+# Define FCS files for tumor-bearing and control mice
+fcs_files <- list(
+  "Spleen_Tumor" = "Tumor_Spleen.fcs",
+  "Lungs_Tumor" = "Tumor_Lungs.fcs",
+  "Bone_Tumor" = "Tumor_Bone.fcs",
+  "LymphNodes_Tumor" = "Tumor_LymphNodes.fcs",
+  "Liver_Tumor" = "Tumor_Liver.fcs",
+  "Tumor_Tissue" = "Tumor_Tumor.fcs",
+  "Spleen_Control" = "Control_Spleen.fcs",
+  "Lungs_Control" = "Control_Lungs.fcs",
+  "Bone_Control" = "Control_Bone.fcs",
+  "LymphNodes_Control" = "Control_LymphNodes.fcs",
+  "Liver_Control" = "Control_Liver.fcs"
+)
+
+# Initialize an empty dataframe
+AllFCS <- data.frame()
+
+# Loop through files, read data, and assign metadata
+for (sample in names(fcs_files)) {
+  file_path <- fcs_files[[sample]]
+  
+  # Read FCS file
+  fcs_data <- read.FCS(file_path, transformation = FALSE, truncate_max_range = FALSE)
+  
+  # Convert to dataframe
+  df <- as.data.frame(exprs(fcs_data))
+  
+  # Extract Organ and Condition from sample name
+  organ <- unlist(strsplit(sample, "_"))[1]  # Extract organ name
+  condition <- ifelse(grepl("Tumor", sample), "Tumor", "Control")  # Label condition
+  
+  # Add metadata columns
+  df$Organ <- organ
+  df$Condition <- condition
+  
+  # Append to combined dataset
+  AllFCS <- bind_rows(AllFCS, df)
+}
+
+# Print structure to confirm metadata
+str(AllFCS)
+
+# Define fluorophores to keep
+columns_to_keep <- c(
+  "FJComp-APC-Cy7-A",
+  "FJComp-Alexa Fluor 700-A",
+  "FJComp-BV421-A",
+  "FJComp-BV510-A",
+  "FJComp-BV605-A",
+  "FJComp-BV650-A",
+  "FJComp-PE-CF594-A",
+  "FJComp-PerCP-Cy5.5-A",
+  "FJComp-PE-Cy7-A",
+  "FJComp-mEmerald-A"
+)
+
+# Keep selected columns
+TSNEData <- AllFCS[, intersect(columns_to_keep, colnames(AllFCS)), drop = FALSE]
+
+# Retain metadata (Organ, Condition)
+TSNEData$Organ <- AllFCS$Organ
+TSNEData$Condition <- AllFCS$Condition
+
+# Set seed for reproducibility
+set.seed(42)
+
+# Run t-SNE on expression data
+TSNE_result <- Rtsne(TSNEData[, -c(ncol(TSNEData)-1, ncol(TSNEData))],  # Exclude metadata columns
+                     perplexity = min(50, nrow(TSNEData)/3), 
+                     theta = 0.5, verbose = TRUE, check_duplicates = FALSE)
+
+# Create a dataframe with t-SNE results and metadata
+TSNE_df <- data.frame(
+  X = TSNE_result$Y[,1],
+  Y = TSNE_result$Y[,2],
+  Organ = TSNEData$Organ,
+  Condition = TSNEData$Condition
+)
+
+ggplot(TSNE_df, aes(x = X, y = Y, color = Condition)) +
+  geom_point(alpha = 0.6, size = 0.7) +
+  theme_minimal() +
+  scale_color_manual(values = c("Tumor" = "red", "Control" = "blue")) +
+  ggtitle("t-SNE of Tumor vs Control Mice") +
+  labs(color = "Condition")
+
+ggplot(TSNE_df, aes(x = X, y = Y, color = Organ)) +
+  geom_point(alpha = 0.6, size = 0.7) +
+  theme_minimal() +
+  scale_color_manual(values = c("Spleen" = "red", "Lungs" = "blue", 
+                                "Bone" = "green", "Lymph Nodes" = "purple", 
+                                "Liver" = "orange", "Tumors" = "black")) +
+  ggtitle("t-SNE of Different Organs in Tumor and Control Mice") +
+  labs(color = "Organ Type")
+
+fluorophore_of_interest <- "FJComp-BV421-A"  # Change this to any fluorophore
+
+ggplot(AllFCS, aes(x = Condition, y = AllFCS[[fluorophore_of_interest]], fill = Condition)) +
+  geom_violin(alpha = 0.7) +
+  theme_minimal() +
+  scale_fill_manual(values = c("Tumor" = "red", "Control" = "blue")) +
+  ggtitle(paste("Expression of", fluorophore_of_interest, "in Tumor vs Control Mice")) +
+  labs(y = fluorophore_of_interest, x = "Condition")
